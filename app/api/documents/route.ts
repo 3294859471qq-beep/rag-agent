@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getEmbedding } from '@/lib/embeddings'
+import { getEmbeddingBatch } from '@/lib/embeddings'
 import { saveDocument, getDocuments, deleteDocument } from '@/lib/vector-store'
 import type { Chunk, Document } from '@/lib/types'
 
@@ -51,18 +51,14 @@ export async function POST(req: NextRequest) {
   }
 
   const docId = crypto.randomUUID()
-  const chunks: Chunk[] = []
-
-  for (const text of textChunks) {
-    const embedding = await getEmbedding(text)
-    chunks.push({
-      id: crypto.randomUUID(),
-      docId,
-      docTitle: title,
-      content: text,
-      embedding,
-    })
-  }
+  const embeddings = await getEmbeddingBatch(textChunks)
+  const chunks: Chunk[] = textChunks.map((text, i) => ({
+    id: crypto.randomUUID(),
+    docId,
+    docTitle: title,
+    content: text,
+    embedding: embeddings[i],
+  }))
 
   const doc: Document = {
     id: docId,
