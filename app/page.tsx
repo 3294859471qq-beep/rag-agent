@@ -21,6 +21,7 @@ import {
   Zap,
   Terminal,
   GraduationCap,
+  ImagePlus,
 } from 'lucide-react'
 import type { Message, ToolCallRecord, PlanTask } from '@/lib/types'
 import type { AgentEvent } from '@/lib/types'
@@ -230,6 +231,15 @@ function MessageBubble({ msg }: { msg: Message }) {
               <ToolStep key={i} tc={tc} />
             ))}
           </div>
+        )}
+
+        {/* Image (user messages) */}
+        {msg.image && (
+          <img
+            src={msg.image}
+            alt="上传的图片"
+            className="max-w-xs max-h-64 rounded-xl mb-1 object-contain border border-indigo-200"
+          />
         )}
 
         {/* Content */}
@@ -534,9 +544,31 @@ export default function Home() {
   const [showDocs, setShowDocs] = useState(false)
   const [showProgress, setShowProgress] = useState(false)
   const [mode, setMode] = useState<Mode>('single')
+  const [pendingImage, setPendingImage] = useState<string | null>(null)
+  const imageInputRef = useRef<HTMLInputElement>(null)
 
   const toggleDocs = () => { setShowDocs(v => !v); setShowProgress(false) }
   const toggleProgress = () => { setShowProgress(v => !v); setShowDocs(false) }
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    // Compress: resize to max 1024px, JPEG 85%
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      const MAX = 1024
+      const scale = Math.min(MAX / img.width, MAX / img.height, 1)
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.round(img.width * scale)
+      canvas.height = Math.round(img.height * scale)
+      canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height)
+      URL.revokeObjectURL(url)
+      setPendingImage(canvas.toDataURL('image/jpeg', 0.85))
+    }
+    img.src = url
+    if (imageInputRef.current) imageInputRef.current.value = ''
+  }
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -548,10 +580,14 @@ export default function Home() {
     const text = input.trim()
     if (!text || loading) return
 
+    const image = pendingImage ?? undefined
+    setPendingImage(null)
+
     const userMsg: Message = {
       id: crypto.randomUUID(),
       role: 'user',
       content: text,
+      image,
       timestamp: Date.now(),
     }
 
@@ -573,13 +609,14 @@ export default function Home() {
     const history = [...messages, userMsg].map(m => ({
       role: m.role,
       content: m.content,
+      ...(m.image ? { image: m.image } : {}),
     }))
 
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: history, mode }),
+        body: JSON.stringify({ messages: history, mode, image }),
       })
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -818,7 +855,41 @@ export default function Home() {
 
         {/* Input */}
         <div className="px-4 py-3 bg-white border-t border-gray-100">
+          {/* Pending image preview */}
+          {pendingImage && (
+            <div className="relative inline-block mb-2 ml-1">
+              <img src={pendingImage} alt="待发送" className="h-20 rounded-lg border border-indigo-200 object-contain" />
+              <button
+                onClick={() => setPendingImage(null)}
+                className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-gray-700 text-white rounded-full flex items-center justify-center hover:bg-red-500 transition-colors"
+              >
+                <X size={10} />
+              </button>
+            </div>
+          )}
+
           <div className="flex gap-2 items-end max-w-4xl mx-auto">
+            {/* Hidden image file input */}
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleImageSelect}
+            />
+            {/* Image upload button */}
+            <button
+              onClick={() => imageInputRef.current?.click()}
+              disabled={loading}
+              className={`flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-xl border transition-colors disabled:opacity-40 ${
+                pendingImage
+                  ? 'border-indigo-400 bg-indigo-50 text-indigo-600'
+                  : 'border-gray-200 text-gray-400 hover:border-indigo-300 hover:text-indigo-500'
+              }`}
+              title="上传图片（教材截图、公式照片等）"
+            >
+              <ImagePlus size={16} />
+            </button>
             <textarea
               ref={textareaRef}
               value={input}

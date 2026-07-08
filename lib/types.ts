@@ -31,6 +31,7 @@ export interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
+  image?: string        // base64 data URL, user messages only
   toolCalls?: ToolCallRecord[]
   timestamp: number
   // multi-agent fields
