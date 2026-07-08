@@ -20,12 +20,22 @@ export interface ToolCallRecord {
   output: string
 }
 
+export interface PlanTask {
+  id: string
+  description: string
+  done: boolean
+  result?: string
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
   toolCalls?: ToolCallRecord[]
   timestamp: number
+  // multi-agent fields
+  agentPhase?: 'planner' | 'executor' | 'checker' | 'done'
+  plan?: PlanTask[]
 }
 
 export type AgentEvent =
@@ -34,3 +44,7 @@ export type AgentEvent =
   | { type: 'text'; content: string }
   | { type: 'done' }
   | { type: 'error'; content: string }
+  | { type: 'agent_start'; agent: 'planner' | 'executor' | 'checker'; description: string }
+  | { type: 'plan'; tasks: Array<{ id: string; description: string }> }
+  | { type: 'task_start'; taskId: string; description: string }
+  | { type: 'task_result'; taskId: string; result: string }
