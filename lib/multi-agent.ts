@@ -164,25 +164,54 @@ export function runMultiAgent(
         const draft = writerResp.choices[0].message.content ?? ''
 
         // ── 审核Agent ───────────────────────────────────────────────────
-        // 职责：对照研究数据审查草稿，纠正错误后流式输出最终答案
-        send({ type: 'agent_start', agent: 'checker', description: '审核草稿准确性，输出最终回答' })
+        // 职责：可运行代码验证正确性，对照研究数据审查草稿，流式输出最终答案
+        send({ type: 'agent_start', agent: 'checker', description: '运行代码验证，审核草稿，输出最终回答' })
 
+        const checkerSystemPrompt = `你是审核Agent。审查写作草稿，确保：
+1. 如果草稿包含代码，必须调用 run_code 工具实际运行验证正确性，再根据运行结果修正
+2. 如果知识库有相关数据，检查草稿是否与数据一致
+3. 如果知识库没有相关数据，草稿基于通用知识回答是正确的，直接润色后输出
+4. 回答准确完整地解答了用户问题
+直接输出最终答案，不要说"草稿已审核"之类的元信息。`
+
+        const checkerMsgs: OpenAI.ChatCompletionMessageParam[] = [
+          { role: 'system', content: checkerSystemPrompt },
+          {
+            role: 'user',
+            content: `用户问题: ${userQuestion}${historyCtx}\n\n原始研究数据:\n${researchSummary}\n\n写作草稿:\n${draft}\n\n请先验证（如有代码），再输出最终回答:`,
+          },
+        ]
+
+        // 工具验证阶段（非流式，最多 2 轮，只允许 run_code）
+        const checkerTools = TOOL_DEFINITIONS.filter(t => t.function.name === 'run_code')
+        for (let round = 0; round < 2; round++) {
+          const verifyResp = await client.chat.completions.create({
+            model: MODEL,
+            messages: checkerMsgs,
+            tools: checkerTools,
+            tool_choice: 'auto',
+            max_tokens: 512,
+          })
+          const verifyMsg = verifyResp.choices[0].message
+          if (!verifyMsg.tool_calls?.length) break
+
+          checkerMsgs.push(verifyMsg)
+          const toolResults: OpenAI.ChatCompletionToolMessageParam[] = []
+          for (const tc of verifyMsg.tool_calls) {
+            let args: Record<string, unknown> = {}
+            try { args = JSON.parse(tc.function.arguments || '{}') } catch { /* */ }
+            send({ type: 'tool_start', tool: tc.function.name, input: args })
+            const output = await executeTool(tc.function.name, args)
+            send({ type: 'tool_end', tool: tc.function.name, output })
+            toolResults.push({ role: 'tool', tool_call_id: tc.id, content: output })
+          }
+          checkerMsgs.push(...toolResults)
+        }
+
+        // 流式输出最终答案
         const checkerStream = await client.chat.completions.create({
           model: MODEL,
-          messages: [
-            {
-              role: 'system',
-              content: `你是审核Agent。审查写作草稿，确保：
-1. 如果知识库有相关数据，检查草稿是否与数据一致
-2. 如果知识库没有相关数据（研究数据显示无结果），草稿基于通用知识回答是正确的，直接润色输出即可，不要否定它
-3. 回答准确完整地解答了用户问题
-直接输出最终答案，不要说"草稿已审核"之类的元信息。`,
-            },
-            {
-              role: 'user',
-              content: `用户问题: ${userQuestion}${historyCtx}\n\n原始研究数据:\n${researchSummary}\n\n写作草稿:\n${draft}\n\n请审核并输出最终回答:`,
-            },
-          ],
+          messages: checkerMsgs,
           stream: true,
           max_tokens: 2048,
         })

@@ -19,6 +19,7 @@ import {
   Plus,
   Users,
   Zap,
+  Terminal,
 } from 'lucide-react'
 import type { Message, ToolCallRecord, PlanTask } from '@/lib/types'
 import type { AgentEvent } from '@/lib/types'
@@ -38,20 +39,19 @@ function ToolStep({ tc }: { tc: ToolCallRecord }) {
   const [open, setOpen] = useState(false)
 
   const icon =
-    tc.tool === 'search_knowledge' ? (
-      <Search size={13} />
-    ) : tc.tool === 'calculate' ? (
-      <Calculator size={13} />
-    ) : (
-      <Clock size={13} />
-    )
+    tc.tool === 'search_knowledge' ? <Search size={13} /> :
+    tc.tool === 'calculate' ? <Calculator size={13} /> :
+    tc.tool === 'run_code' ? <Terminal size={13} /> :
+    <Clock size={13} />
 
   const label =
     tc.tool === 'search_knowledge'
       ? `搜索: "${(tc.input as { query?: string }).query ?? ''}"`
       : tc.tool === 'calculate'
         ? `计算: ${(tc.input as { expression?: string }).expression ?? ''}`
-        : '获取当前时间'
+        : tc.tool === 'run_code'
+          ? `运行 ${(tc.input as { language?: string }).language ?? 'code'}`
+          : '获取当前时间'
 
   return (
     <div className="mt-1 rounded-lg border border-blue-100 bg-blue-50 text-xs overflow-hidden">

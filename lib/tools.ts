@@ -48,6 +48,28 @@ export const TOOL_DEFINITIONS: OpenAI.ChatCompletionTool[] = [
       parameters: { type: 'object', properties: {} },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'run_code',
+      description:
+        '在安全沙箱中执行代码并返回运行结果（stdout/stderr）。适合验证代码逻辑、运行测试、计算复杂表达式。支持 python、javascript、typescript、go、rust、java、cpp 等语言。',
+      parameters: {
+        type: 'object',
+        properties: {
+          language: {
+            type: 'string',
+            description: '编程语言，如 python、javascript、typescript、go、rust、java、cpp',
+          },
+          code: {
+            type: 'string',
+            description: '要执行的完整代码',
+          },
+        },
+        required: ['language', 'code'],
+      },
+    },
+  },
 ]
 
 export async function executeTool(
@@ -97,6 +119,39 @@ export async function executeTool(
         second: '2-digit',
       })
       return `当前时间（北京时间）: ${formatted}`
+    }
+
+    case 'run_code': {
+      const langRaw = (args.language as string ?? 'python').toLowerCase().trim()
+      const langMap: Record<string, string> = { py: 'python', js: 'javascript', ts: 'typescript', 'c++': 'c++', cpp: 'c++' }
+      const language = langMap[langRaw] ?? langRaw
+      const code = args.code as string
+
+      try {
+        const resp = await fetch('https://emkc.org/api/v2/piston/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ language, version: '*', files: [{ content: code }] }),
+          signal: AbortSignal.timeout(15000),
+        })
+        if (!resp.ok) return `执行失败: HTTP ${resp.status}`
+
+        const data = await resp.json() as {
+          run?: { stdout?: string; stderr?: string; code?: number }
+          message?: string
+        }
+        if (data.message) return `沙箱错误: ${data.message}`
+
+        const stdout = (data.run?.stdout ?? '').trim()
+        const stderr = (data.run?.stderr ?? '').trim()
+        const exitCode = data.run?.code ?? 0
+
+        if (exitCode !== 0 && stderr) return `运行错误 (exit ${exitCode}):\n${stderr}`
+        if (stderr) return `输出:\n${stdout}\n\n标准错误:\n${stderr}`
+        return stdout || '（执行成功，无输出）'
+      } catch (e) {
+        return `执行失败: ${e instanceof Error ? e.message : '网络错误'}`
+      }
     }
 
     default:
