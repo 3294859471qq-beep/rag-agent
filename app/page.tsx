@@ -22,7 +22,9 @@ import {
   Terminal,
   GraduationCap,
   ImagePlus,
+  Globe,
 } from 'lucide-react'
+import katex from 'katex'
 import type { Message, ToolCallRecord, PlanTask } from '@/lib/types'
 import type { AgentEvent } from '@/lib/types'
 
@@ -69,24 +71,74 @@ function saveProgress(p: StudyProgress) {
   localStorage.setItem(PROGRESS_KEY, JSON.stringify(p))
 }
 
+// ─── LaTeX math renderer ─────────────────────────────────────────────────────
+type Segment = { type: 'text' | 'block' | 'inline'; content: string }
+
+function parseMath(text: string): Segment[] {
+  const segs: Segment[] = []
+  // Split on $$...$$ first (block math)
+  const blockParts = text.split(/(\$\$[\s\S]+?\$\$)/g)
+  for (const part of blockParts) {
+    if (part.startsWith('$$') && part.endsWith('$$')) {
+      segs.push({ type: 'block', content: part.slice(2, -2) })
+    } else {
+      // Split on $...$ (inline math), avoid currency like $5
+      const inlineParts = part.split(/(\$[^$\n]{1,200}?\$)/g)
+      for (const p of inlineParts) {
+        if (p.startsWith('$') && p.endsWith('$') && p.length > 2) {
+          segs.push({ type: 'inline', content: p.slice(1, -1) })
+        } else {
+          if (p) segs.push({ type: 'text', content: p })
+        }
+      }
+    }
+  }
+  return segs
+}
+
+function renderKatex(math: string, display: boolean): string {
+  try {
+    return katex.renderToString(math, { displayMode: display, throwOnError: false, output: 'html' })
+  } catch {
+    return display ? `$$${math}$$` : `$${math}$`
+  }
+}
+
+function MathContent({ content }: { content: string }) {
+  const segs = parseMath(content)
+  return (
+    <>
+      {segs.map((seg, i) => {
+        if (seg.type === 'text') return <span key={i} className="whitespace-pre-wrap">{seg.content}</span>
+        return (
+          <span
+            key={i}
+            className={seg.type === 'block' ? 'block my-2 overflow-x-auto' : 'inline'}
+            dangerouslySetInnerHTML={{ __html: renderKatex(seg.content, seg.type === 'block') }}
+          />
+        )
+      })}
+    </>
+  )
+}
+
 // ─── Tool call step display ───────────────────────────────────────────────────
 function ToolStep({ tc }: { tc: ToolCallRecord }) {
   const [open, setOpen] = useState(false)
 
   const icon =
     tc.tool === 'search_knowledge' ? <Search size={13} /> :
-    tc.tool === 'calculate' ? <Calculator size={13} /> :
-    tc.tool === 'run_code' ? <Terminal size={13} /> :
+    tc.tool === 'calculate'        ? <Calculator size={13} /> :
+    tc.tool === 'run_code'         ? <Terminal size={13} /> :
+    tc.tool === 'web_search'       ? <Globe size={13} /> :
     <Clock size={13} />
 
   const label =
-    tc.tool === 'search_knowledge'
-      ? `搜索: "${(tc.input as { query?: string }).query ?? ''}"`
-      : tc.tool === 'calculate'
-        ? `计算: ${(tc.input as { expression?: string }).expression ?? ''}`
-        : tc.tool === 'run_code'
-          ? `运行 ${(tc.input as { language?: string }).language ?? 'code'}`
-          : '获取当前时间'
+    tc.tool === 'search_knowledge' ? `搜索知识库: "${(tc.input as { query?: string }).query ?? ''}"` :
+    tc.tool === 'calculate'        ? `计算: ${(tc.input as { expression?: string }).expression ?? ''}` :
+    tc.tool === 'run_code'         ? `运行 ${(tc.input as { language?: string }).language ?? 'code'}` :
+    tc.tool === 'web_search'       ? `联网搜索: "${(tc.input as { query?: string }).query ?? ''}"` :
+    '获取当前时间'
 
   return (
     <div className="mt-1 rounded-lg border border-blue-100 bg-blue-50 text-xs overflow-hidden">
@@ -245,13 +297,13 @@ function MessageBubble({ msg }: { msg: Message }) {
         {/* Content */}
         {msg.content && (
           <div
-            className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap
+            className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed
               ${isUser
-                ? 'bg-indigo-500 text-white rounded-tr-sm'
+                ? 'bg-indigo-500 text-white rounded-tr-sm whitespace-pre-wrap'
                 : 'bg-white border border-gray-100 shadow-sm text-gray-800 rounded-tl-sm'
               }`}
           >
-            {msg.content}
+            {isUser ? msg.content : <MathContent content={msg.content} />}
           </div>
         )}
       </div>

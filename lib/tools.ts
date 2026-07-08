@@ -51,6 +51,29 @@ export const TOOL_DEFINITIONS: OpenAI.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'web_search',
+      description:
+        '联网搜索最新信息、Wikipedia 百科、arXiv 论文等。当知识库没有相关内容，或需要最新资料、外部参考时使用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: '搜索关键词，中英文均可，如 "黎曼曲率张量 定义" 或 "Riemann curvature tensor"',
+          },
+          lang: {
+            type: 'string',
+            enum: ['zh', 'en'],
+            description: '优先语言：zh=中文（默认），en=英文',
+          },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'run_code',
       description:
         '在安全沙箱中执行代码并返回运行结果（stdout/stderr）。适合验证代码逻辑、运行测试、计算复杂表达式。支持 python、javascript、typescript、go、rust、java、cpp 等语言。',
@@ -119,6 +142,73 @@ export async function executeTool(
         second: '2-digit',
       })
       return `当前时间（北京时间）: ${formatted}`
+    }
+
+    case 'web_search': {
+      const query = args.query as string
+      const lang = (args.lang as string) || 'zh'
+
+      // Tavily（若配置了 API key，效果更好）
+      const tavilyKey = process.env.TAVILY_API_KEY
+      if (tavilyKey) {
+        try {
+          const resp = await fetch('https://api.tavily.com/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              api_key: tavilyKey,
+              query,
+              search_depth: 'basic',
+              max_results: 4,
+              include_answer: true,
+            }),
+            signal: AbortSignal.timeout(15000),
+          })
+          if (resp.ok) {
+            const data = await resp.json() as {
+              answer?: string
+              results?: Array<{ title: string; url: string; content: string }>
+            }
+            const lines: string[] = []
+            if (data.answer) lines.push(`摘要: ${data.answer}\n`)
+            data.results?.forEach((r, i) => {
+              lines.push(`[${i + 1}] ${r.title}\n来源: ${r.url}\n${r.content.slice(0, 400)}`)
+            })
+            return lines.join('\n\n---\n\n') || '未找到结果'
+          }
+        } catch { /* fallthrough to Wikipedia */ }
+      }
+
+      // 免费 fallback：Wikipedia
+      try {
+        const searchUrl = `https://${lang}.wikipedia.org/w/api.php?` +
+          `action=query&list=search&srsearch=${encodeURIComponent(query)}` +
+          `&srlimit=3&format=json&utf8=1&origin=*`
+        const searchResp = await fetch(searchUrl, { signal: AbortSignal.timeout(10000) })
+        if (!searchResp.ok) return '搜索失败'
+        const searchData = await searchResp.json() as {
+          query: { search: Array<{ title: string; snippet: string }> }
+        }
+        const hits = searchData.query.search
+        if (!hits.length) return '未找到相关内容'
+
+        // 获取前两条的摘要
+        const titles = hits.slice(0, 2).map(h => h.title)
+        const extractUrl = `https://${lang}.wikipedia.org/w/api.php?` +
+          `action=query&prop=extracts&exintro=true&explaintext=true` +
+          `&titles=${titles.map(t => encodeURIComponent(t)).join('|')}` +
+          `&format=json&utf8=1&origin=*`
+        const extractResp = await fetch(extractUrl, { signal: AbortSignal.timeout(10000) })
+        const extractData = await extractResp.json() as {
+          query: { pages: Record<string, { title: string; extract?: string }> }
+        }
+        const results = Object.values(extractData.query.pages)
+          .filter(p => p.extract)
+          .map(p => `【${p.title}】\n${p.extract!.slice(0, 600)}`)
+        return results.join('\n\n---\n\n') || '未找到摘要'
+      } catch (e) {
+        return `搜索失败: ${e instanceof Error ? e.message : '网络错误'}`
+      }
     }
 
     case 'run_code': {
