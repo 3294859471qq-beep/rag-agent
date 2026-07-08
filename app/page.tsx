@@ -79,8 +79,8 @@ function ToolStep({ tc }: { tc: ToolCallRecord }) {
 function MultiAgentWorkflow({ msg }: { msg: Message }) {
   const [expanded, setExpanded] = useState(true)
 
-  const phases = ['planner', 'executor', 'checker'] as const
-  const phaseLabels = { planner: '规划', executor: '执行', checker: '审查' }
+  const phases = ['planner', 'researcher', 'writer', 'checker'] as const
+  const phaseLabels = { planner: '规划', researcher: '研究', writer: '写作', checker: '审核' }
   const currentIdx = phases.indexOf(
     (msg.agentPhase ?? 'planner') as typeof phases[number]
   )
@@ -530,7 +530,7 @@ export default function Home() {
             <div>
               <h1 className="font-semibold text-gray-800 text-sm leading-none">RAG Agent</h1>
               <p className="text-xs text-gray-400 mt-0.5">
-                {mode === 'multi' ? '规划 · 执行 · 审查 · 三Agent协同' : '向量检索 · Tool Use · 流式输出'}
+                {mode === 'multi' ? '规划 · 研究 · 写作 · 审核 · 四Agent协同' : '向量检索 · Tool Use · 流式输出'}
               </p>
             </div>
           </div>
@@ -583,13 +583,14 @@ export default function Home() {
                 <>
                   <p className="text-base font-medium text-gray-600">多Agent协同模式</p>
                   <p className="text-sm mt-1 max-w-xs">
-                    三个专业Agent协同工作：规划Agent拆解任务，执行Agent调用工具，审查Agent生成最终回答。
+                    四个专业Agent各司其职：规划→研究→写作→审核，每个Agent只做自己份内的事。
                   </p>
                   <div className="mt-6 flex items-center gap-2 text-xs">
                     {[
-                      { color: 'bg-violet-100 text-violet-700', label: '规划Agent', desc: '拆解任务' },
-                      { color: 'bg-blue-100 text-blue-700', label: '执行Agent', desc: '调用工具' },
-                      { color: 'bg-emerald-100 text-emerald-700', label: '审查Agent', desc: '整合输出' },
+                      { color: 'bg-violet-100 text-violet-700', label: '规划Agent', desc: '分析 · 规划' },
+                      { color: 'bg-blue-100 text-blue-700', label: '研究Agent', desc: '搜索 · 计算' },
+                      { color: 'bg-amber-100 text-amber-700', label: '写作Agent', desc: '组织 · 撰写' },
+                      { color: 'bg-emerald-100 text-emerald-700', label: '审核Agent', desc: '核查 · 输出' },
                     ].map((a, i) => (
                       <div key={i} className={`${a.color} rounded-lg px-3 py-2 text-center`}>
                         <p className="font-medium">{a.label}</p>
@@ -673,7 +674,7 @@ export default function Home() {
           </div>
           <p className="text-center text-xs text-gray-300 mt-1.5">
             {mode === 'multi'
-              ? 'DeepSeek-V3 · 规划Agent + 执行Agent + 审查Agent'
+              ? 'DeepSeek-V3 · 规划 → 研究 → 写作 → 审核'
               : 'DeepSeek-V3 · BAAI/bge-m3 向量检索 · SiliconFlow'}
           </p>
         </div>

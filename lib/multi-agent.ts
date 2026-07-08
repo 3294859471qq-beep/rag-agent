@@ -2,9 +2,15 @@ import OpenAI from 'openai'
 import { TOOL_DEFINITIONS, executeTool } from './tools'
 import type { AgentEvent } from './types'
 
+// Plan C: 四个角色严格分工，互不越界
+//   规划Agent  → 确定需要研究哪些信息
+//   研究Agent  → 只负责调用工具收集数据（不写答案）
+//   写作Agent  → 只负责组织语言撰写草稿（不调工具）
+//   审核Agent  → 审查草稿准确性并流式输出最终答案
+
 const MODEL = process.env.AI_MODEL || 'deepseek-ai/DeepSeek-V3'
 const BASE_URL = process.env.AI_BASE_URL || 'https://api.siliconflow.cn/v1'
-const MAX_EXECUTOR_ROUNDS = 3
+const MAX_RESEARCH_ROUNDS = 3
 
 function getClient(): OpenAI {
   const apiKey = process.env.AI_API_KEY
@@ -26,101 +32,93 @@ export function runMultiAgent(
         const client = getClient()
         const userQuestion = messages.filter(m => m.role === 'user').pop()?.content ?? ''
         const history = messages.slice(0, -1)
-        const historyContext =
+        const historyCtx =
           history.length > 0
             ? '\n\n对话历史:\n' +
               history.map(m => `${m.role === 'user' ? '用户' : '助手'}: ${m.content}`).join('\n')
             : ''
 
-        // ── Phase 1: Planner ────────────────────────────────────────────
-        send({ type: 'agent_start', agent: 'planner', description: '分析问题，制定执行计划' })
+        // ── 规划Agent ───────────────────────────────────────────────────
+        // 职责：分析问题，列出需要研究的信息目标
+        send({ type: 'agent_start', agent: 'planner', description: '分析问题，规划研究方向' })
 
         const plannerResp = await client.chat.completions.create({
           model: MODEL,
           messages: [
             {
               role: 'system',
-              content: `你是规划Agent。分析用户问题，拆解为2-4个具体可执行的子任务。
+              content: `你是规划Agent。分析用户问题，列出研究Agent需要收集的信息目标（1-4个）。
 
-可用工具：search_knowledge（搜索知识库）、calculate（数学计算）、get_datetime（获取时间）
+可用工具：search_knowledge（搜索知识库）、calculate（计算）、get_datetime（获取时间）
 
-原则：简单问题1-2个任务，复杂问题3-4个。每个任务要明确可操作。
 只输出 JSON，不要其他文字：
-{"tasks":[{"id":"t1","description":"任务描述"},{"id":"t2","description":"任务描述"}]}`,
+{"research_goals":[{"id":"r1","description":"需要了解什么"},{"id":"r2","description":"需要计算什么"}]}`,
             },
-            { role: 'user', content: `用户问题: ${userQuestion}${historyContext}` },
+            { role: 'user', content: `问题: ${userQuestion}${historyCtx}` },
           ],
           temperature: 0.2,
           max_tokens: 512,
         })
 
-        let plan: Array<{ id: string; description: string }> = []
+        let goals: Array<{ id: string; description: string }> = []
         try {
           const raw = plannerResp.choices[0].message.content ?? '{}'
           const jsonMatch = raw.match(/\{[\s\S]*\}/)
           const parsed = JSON.parse(jsonMatch?.[0] ?? raw)
-          plan = Array.isArray(parsed.tasks) ? parsed.tasks : []
-        } catch {
-          /* fallthrough */
-        }
-        if (plan.length === 0) {
-          plan = [{ id: 't1', description: '搜索知识库并回答用户问题' }]
+          goals = Array.isArray(parsed.research_goals) ? parsed.research_goals : []
+        } catch { /* fallthrough */ }
+        if (goals.length === 0) {
+          goals = [{ id: 'r1', description: '搜索知识库获取相关信息' }]
         }
 
-        send({ type: 'plan', tasks: plan })
+        send({ type: 'plan', tasks: goals })
 
-        // ── Phase 2: Executor ───────────────────────────────────────────
-        send({ type: 'agent_start', agent: 'executor', description: '按计划逐步执行，调用工具' })
+        // ── 研究Agent ───────────────────────────────────────────────────
+        // 职责：只调用工具收集原始数据，不做任何总结或写作
+        send({ type: 'agent_start', agent: 'researcher', description: '调用工具，收集原始数据' })
 
-        const results: Array<{ taskId: string; description: string; result: string }> = []
+        const findings: Array<{ goalId: string; description: string; data: string }> = []
 
-        for (const task of plan) {
-          send({ type: 'task_start', taskId: task.id, description: task.description })
+        for (const goal of goals) {
+          send({ type: 'task_start', taskId: goal.id, description: goal.description })
 
-          const priorContext =
-            results.length > 0
-              ? '\n\n前置任务结果:\n' +
-                results.map(r => `[${r.taskId}] ${r.description}\n→ ${r.result}`).join('\n\n')
-              : ''
-
-          const execMessages: OpenAI.ChatCompletionMessageParam[] = [
+          const researchMsgs: OpenAI.ChatCompletionMessageParam[] = [
             {
               role: 'system',
-              content:
-                '你是执行Agent。专注完成分配的具体任务，按需调用工具。完成后给出简洁结果（不超过200字）。',
+              content: `你是研究Agent。职责是收集信息，不是回答问题。
+使用工具获取原始数据后，只输出收集到的原始信息（不要总结，不要写回答）。
+如果工具没有返回有用内容，如实说明"未找到相关信息"。`,
             },
             {
               role: 'user',
-              content: `原始问题: ${userQuestion}${historyContext}${priorContext}\n\n当前任务: ${task.description}`,
+              content: `原始问题: ${userQuestion}${historyCtx}\n\n研究目标: ${goal.description}`,
             },
           ]
 
-          let taskResult = '（无结果）'
+          let rawData = '（未收集到数据）'
 
-          for (let round = 0; round < MAX_EXECUTOR_ROUNDS; round++) {
-            const execResp = await client.chat.completions.create({
+          for (let round = 0; round < MAX_RESEARCH_ROUNDS; round++) {
+            const resp = await client.chat.completions.create({
               model: MODEL,
-              messages: execMessages,
+              messages: researchMsgs,
               tools: TOOL_DEFINITIONS,
               tool_choice: 'auto',
               max_tokens: 1024,
             })
 
-            const msg = execResp.choices[0].message
+            const msg = resp.choices[0].message
 
             if (!msg.tool_calls?.length) {
-              taskResult = msg.content ?? '任务完成'
+              rawData = msg.content ?? '（无数据）'
               break
             }
 
-            execMessages.push(msg)
+            researchMsgs.push(msg)
             const toolResults: OpenAI.ChatCompletionToolMessageParam[] = []
 
             for (const tc of msg.tool_calls) {
               let args: Record<string, unknown> = {}
-              try {
-                args = JSON.parse(tc.function.arguments || '{}')
-              } catch { /* */ }
+              try { args = JSON.parse(tc.function.arguments || '{}') } catch { /* */ }
 
               send({ type: 'tool_start', tool: tc.function.name, input: args })
               const output = await executeTool(tc.function.name, args)
@@ -128,31 +126,62 @@ export function runMultiAgent(
               toolResults.push({ role: 'tool', tool_call_id: tc.id, content: output })
             }
 
-            execMessages.push(...toolResults)
+            researchMsgs.push(...toolResults)
           }
 
-          results.push({ taskId: task.id, description: task.description, result: taskResult })
-          send({ type: 'task_result', taskId: task.id, result: taskResult })
+          findings.push({ goalId: goal.id, description: goal.description, data: rawData })
+          send({ type: 'task_result', taskId: goal.id, result: rawData })
         }
 
-        // ── Phase 3: Checker (streaming) ───────────────────────────────
-        send({ type: 'agent_start', agent: 'checker', description: '审查执行结果，生成最终回答' })
+        // ── 写作Agent ───────────────────────────────────────────────────
+        // 职责：只根据研究数据组织语言，不调用任何工具
+        send({ type: 'agent_start', agent: 'writer', description: '整合研究数据，撰写回答草稿' })
 
-        const executionSummary = results
-          .map(r => `[${r.taskId}] ${r.description}\n→ ${r.result}`)
+        const researchSummary = findings
+          .map(f => `【${f.description}】\n${f.data}`)
           .join('\n\n')
+
+        const writerResp = await client.chat.completions.create({
+          model: MODEL,
+          messages: [
+            {
+              role: 'system',
+              content: `你是写作Agent。职责是将研究数据组织成清晰流畅的回答，不调用任何工具。
+原则：
+- 严格基于研究数据，不要臆造信息
+- 结构清晰，语言自然
+- 直接回答用户问题，不提"研究数据"等内部信息
+- 标注不确定或数据缺失的部分（供审核Agent检查）`,
+            },
+            {
+              role: 'user',
+              content: `用户问题: ${userQuestion}${historyCtx}\n\n研究数据:\n${researchSummary}\n\n请撰写回答草稿:`,
+            },
+          ],
+          max_tokens: 2048,
+        })
+
+        const draft = writerResp.choices[0].message.content ?? ''
+
+        // ── 审核Agent ───────────────────────────────────────────────────
+        // 职责：对照研究数据审查草稿，纠正错误后流式输出最终答案
+        send({ type: 'agent_start', agent: 'checker', description: '审核草稿准确性，输出最终回答' })
 
         const checkerStream = await client.chat.completions.create({
           model: MODEL,
           messages: [
             {
               role: 'system',
-              content: `你是审查Agent。基于执行结果，给用户一个完整准确的最终回答。
-直接回答问题，语言自然流畅，重点突出，不要提"执行结果"等内部信息。`,
+              content: `你是审核Agent。对照原始研究数据审查写作草稿，确保：
+1. 所有事实与研究数据一致
+2. 没有遗漏重要信息
+3. 准确回答了用户问题
+如草稿有误则直接纠正，如草稿准确则润色后输出。
+直接输出最终答案，不要说"草稿已审核"之类的元信息。`,
             },
             {
               role: 'user',
-              content: `用户问题: ${userQuestion}${historyContext}\n\n执行结果:\n${executionSummary}\n\n请给出最终回答:`,
+              content: `用户问题: ${userQuestion}${historyCtx}\n\n原始研究数据:\n${researchSummary}\n\n写作草稿:\n${draft}\n\n请审核并输出最终回答:`,
             },
           ],
           stream: true,

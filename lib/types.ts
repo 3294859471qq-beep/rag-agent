@@ -34,7 +34,7 @@ export interface Message {
   toolCalls?: ToolCallRecord[]
   timestamp: number
   // multi-agent fields
-  agentPhase?: 'planner' | 'executor' | 'checker' | 'done'
+  agentPhase?: 'planner' | 'researcher' | 'writer' | 'checker' | 'done'
   plan?: PlanTask[]
 }
 
@@ -44,7 +44,7 @@ export type AgentEvent =
   | { type: 'text'; content: string }
   | { type: 'done' }
   | { type: 'error'; content: string }
-  | { type: 'agent_start'; agent: 'planner' | 'executor' | 'checker'; description: string }
+  | { type: 'agent_start'; agent: 'planner' | 'researcher' | 'writer' | 'checker'; description: string }
   | { type: 'plan'; tasks: Array<{ id: string; description: string }> }
   | { type: 'task_start'; taskId: string; description: string }
   | { type: 'task_result'; taskId: string; result: string }
