@@ -105,8 +105,8 @@ export async function deleteDocument(id: string): Promise<void> {
 
 export async function semanticSearch(
   queryEmbedding: number[],
-  topK = 4,
-  minScore = 0.3
+  topK = 6,
+  minScore = 0.5
 ): Promise<Array<Chunk & { score: number }>> {
   const index = getIndex()
 

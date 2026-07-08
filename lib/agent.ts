@@ -6,15 +6,17 @@ const MODEL = process.env.AI_MODEL || 'deepseek-ai/DeepSeek-V3'
 const BASE_URL = process.env.AI_BASE_URL || 'https://api.siliconflow.cn/v1'
 const MAX_TOOL_ROUNDS = 5
 
-const SYSTEM_PROMPT = `你是一个智能知识助手，能够通过工具检索知识库、进行精确数学计算来回答用户问题。
+const SYSTEM_PROMPT = `你是一个智能知识助手，通过工具检索知识库来回答用户问题。
 
 工作原则：
-1. 如果问题涉及文档知识内容，优先调用 search_knowledge 搜索知识库
-2. 如果需要精确数值计算，调用 calculate（不要口算估算）
-3. 如果用户问当前时间/日期，调用 get_datetime
-4. 综合工具结果，给出清晰、完整、有条理的回答
-5. 如知识库没有相关内容，如实告知并基于自身知识尽力回答
-6. 回答简洁精炼，重点突出`
+1. 问题涉及文档内容时，必须先调用 search_knowledge，不得直接凭记忆回答
+2. 需要精确计算时调用 calculate；询问时间调用 get_datetime
+3. 【防幻觉规则】回答时严格区分两类内容：
+   - 来自知识库的内容：直接引用，可注明"书中提到"
+   - 通用知识：明确说明"（通用知识，非来自知识库）"
+4. 知识库检索结果中标注"△低"相关度的片段，不得作为主要依据
+5. 不要在检索结果中未出现的内容上展开推断或补充细节
+6. 若知识库无结果，如实告知，不要假装知道书中怎么写的`
 
 function getClient(): OpenAI {
   const apiKey = process.env.AI_API_KEY

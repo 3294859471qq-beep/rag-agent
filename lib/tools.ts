@@ -86,10 +86,10 @@ export async function executeTool(
           return '知识库中没有找到与此问题相关的内容。'
         }
         return results
-          .map(
-            (r, i) =>
-              `[片段 ${i + 1}] 来源: 《${r.docTitle}》（相关度: ${(r.score * 100).toFixed(1)}%）\n${r.content}`
-          )
+          .map((r, i) => {
+            const reliability = r.score >= 0.75 ? '★高' : r.score >= 0.6 ? '☆中' : '△低'
+            return `[片段 ${i + 1}] 来源:《${r.docTitle}》| 相关度: ${(r.score * 100).toFixed(1)}% (${reliability})\n${r.content}`
+          })
           .join('\n\n---\n\n')
       } catch (e) {
         return `搜索失败: ${e instanceof Error ? e.message : '未知错误'}`
