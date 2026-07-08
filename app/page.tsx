@@ -20,6 +20,7 @@ import {
   Users,
   Zap,
   Terminal,
+  GraduationCap,
 } from 'lucide-react'
 import type { Message, ToolCallRecord, PlanTask } from '@/lib/types'
 import type { AgentEvent } from '@/lib/types'
@@ -32,6 +33,39 @@ interface DocMeta {
   title: string
   chunkCount: number
   createdAt: number
+}
+
+// ─── Study progress types & data ──────────────────────────────────────────────
+type ChapterStatus = 'not_started' | 'in_progress' | 'mastered'
+type StudyProgress = Record<string, ChapterStatus>
+
+const CHAPTERS = [
+  { num: 1,  title: '拓扑空间简介',               vol: '上册' },
+  { num: 2,  title: '流形和张量场',                vol: '上册' },
+  { num: 3,  title: '黎曼（内禀）曲率张量',        vol: '上册' },
+  { num: 4,  title: '李导数、Killing场和超曲面',   vol: '上册' },
+  { num: 5,  title: '微分形式及其积分',             vol: '上册' },
+  { num: 6,  title: '狭义相对论',                   vol: '上册' },
+  { num: 7,  title: '广义相对论基础',               vol: '中册' },
+  { num: 8,  title: '爱因斯坦方程的求解',           vol: '中册' },
+  { num: 9,  title: '施瓦西时空',                   vol: '中册' },
+  { num: 10, title: '宇宙论',                        vol: '中册' },
+  { num: 11, title: '时空的整体因果结构',           vol: '中册' },
+  { num: 12, title: '渐近平直时空',                 vol: '中册' },
+  { num: 13, title: 'Kerr-Newman 黑洞',             vol: '下册' },
+  { num: 14, title: '参考系再认识',                 vol: '下册' },
+  { num: 15, title: '广义相对论的拉氏和哈氏形式', vol: '下册' },
+  { num: 16, title: '孤立视界、动力学视界和黑洞力学', vol: '下册' },
+] as const
+
+const PROGRESS_KEY = 'study-progress-liang-canbin'
+
+function loadProgress(): StudyProgress {
+  if (typeof window === 'undefined') return {}
+  try { return JSON.parse(localStorage.getItem(PROGRESS_KEY) ?? '{}') } catch { return {} }
+}
+function saveProgress(p: StudyProgress) {
+  localStorage.setItem(PROGRESS_KEY, JSON.stringify(p))
 }
 
 // ─── Tool call step display ───────────────────────────────────────────────────
@@ -366,13 +400,143 @@ function DocumentPanel({ onClose }: { onClose: () => void }) {
   )
 }
 
+// ─── Progress panel ───────────────────────────────────────────────────────────
+function ProgressPanel({ onClose }: { onClose: () => void }) {
+  const [progress, setProgress] = useState<StudyProgress>({})
+  const [docs, setDocs] = useState<DocMeta[]>([])
+
+  useEffect(() => {
+    setProgress(loadProgress())
+    fetch('/api/documents').then(r => r.json()).then(setDocs).catch(() => {})
+  }, [])
+
+  const toggle = (num: number) => {
+    setProgress(prev => {
+      const cur = prev[num] ?? 'not_started'
+      const next: ChapterStatus =
+        cur === 'not_started' ? 'in_progress' :
+        cur === 'in_progress' ? 'mastered' : 'not_started'
+      const updated = { ...prev, [num]: next }
+      saveProgress(updated)
+      return updated
+    })
+  }
+
+  const inKB = (num: number) =>
+    docs.some(d => d.title.includes(`第${num}章`))
+
+  const mastered  = CHAPTERS.filter(c => progress[c.num] === 'mastered').length
+  const studying  = CHAPTERS.filter(c => progress[c.num] === 'in_progress').length
+  const pct       = Math.round((mastered / CHAPTERS.length) * 100)
+  const vols      = ['上册', '中册', '下册'] as const
+
+  return (
+    <div className="h-full flex flex-col bg-white border-r border-gray-200">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+        <div className="flex items-center gap-2 font-semibold text-gray-800">
+          <GraduationCap size={16} className="text-amber-500" />
+          学习进度
+        </div>
+        <button onClick={onClose} className="p-1 rounded hover:bg-gray-100 text-gray-400">
+          <X size={16} />
+        </button>
+      </div>
+
+      {/* Overview */}
+      <div className="px-4 py-3 border-b border-gray-100">
+        <div className="flex justify-between text-xs text-gray-500 mb-1.5">
+          <span>{mastered} / {CHAPTERS.length} 章已掌握</span>
+          <span className="font-medium text-amber-600">{pct}%</span>
+        </div>
+        <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+          <div className="h-full bg-amber-400 rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
+        </div>
+        <div className="flex gap-3 mt-2 text-[11px] text-gray-400">
+          {[
+            { color: 'bg-amber-400', label: `${mastered} 已掌握` },
+            { color: 'bg-blue-400',  label: `${studying} 学习中` },
+            { color: 'bg-gray-200',  label: `${CHAPTERS.length - mastered - studying} 未开始` },
+          ].map(s => (
+            <span key={s.label} className="flex items-center gap-1">
+              <span className={`w-2 h-2 rounded-full ${s.color}`} />
+              {s.label}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Chapter list */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-4">
+        {vols.map(vol => (
+          <div key={vol}>
+            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5 px-1">
+              梁灿彬 · {vol}
+            </p>
+            <div className="space-y-0.5">
+              {CHAPTERS.filter(c => c.vol === vol).map(c => {
+                const status = progress[c.num] ?? 'not_started'
+                return (
+                  <button
+                    key={c.num}
+                    onClick={() => toggle(c.num)}
+                    title="点击切换：未开始 → 学习中 → 已掌握"
+                    className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors ${
+                      status === 'mastered'    ? 'bg-amber-50 hover:bg-amber-100' :
+                      status === 'in_progress' ? 'bg-blue-50  hover:bg-blue-100'  :
+                      'hover:bg-gray-50'
+                    }`}
+                  >
+                    {/* Status dot */}
+                    <span className={`flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                      status === 'mastered'    ? 'bg-amber-400 text-white' :
+                      status === 'in_progress' ? 'bg-blue-400  text-white' :
+                      'bg-gray-100 text-gray-400'
+                    }`}>
+                      {status === 'mastered' ? '✓' : status === 'in_progress' ? '→' : c.num}
+                    </span>
+
+                    {/* Title */}
+                    <span className={`flex-1 text-xs leading-snug ${
+                      status === 'mastered'    ? 'text-gray-400 line-through' :
+                      status === 'in_progress' ? 'text-blue-700 font-medium'  :
+                      'text-gray-600'
+                    }`}>
+                      第{c.num}章 {c.title}
+                    </span>
+
+                    {/* KB badge */}
+                    {inKB(c.num) && (
+                      <span className="flex-shrink-0 text-[9px] bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded-full font-medium">
+                        已入库
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="px-4 py-2 border-t border-gray-100 text-[11px] text-gray-400 text-center">
+        点击章节切换状态 · 绿色标签表示已上传知识库
+      </div>
+    </div>
+  )
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [showDocs, setShowDocs] = useState(false)
+  const [showProgress, setShowProgress] = useState(false)
   const [mode, setMode] = useState<Mode>('single')
+
+  const toggleDocs = () => { setShowDocs(v => !v); setShowProgress(false) }
+  const toggleProgress = () => { setShowProgress(v => !v); setShowDocs(false) }
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -507,9 +671,10 @@ export default function Home() {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      {showDocs && (
+      {(showDocs || showProgress) && (
         <div className="w-80 flex-shrink-0">
-          <DocumentPanel onClose={() => setShowDocs(false)} />
+          {showDocs     && <DocumentPanel onClose={toggleDocs} />}
+          {showProgress && <ProgressPanel onClose={toggleProgress} />}
         </div>
       )}
 
@@ -517,11 +682,18 @@ export default function Home() {
         {/* Header */}
         <header className="flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-100 shadow-sm">
           <button
-            onClick={() => setShowDocs(v => !v)}
+            onClick={toggleDocs}
             className={`p-2 rounded-lg transition-colors ${showDocs ? 'bg-indigo-50 text-indigo-600' : 'hover:bg-gray-100 text-gray-500'}`}
             title="知识库"
           >
             <BookOpen size={18} />
+          </button>
+          <button
+            onClick={toggleProgress}
+            className={`p-2 rounded-lg transition-colors ${showProgress ? 'bg-amber-50 text-amber-600' : 'hover:bg-gray-100 text-gray-500'}`}
+            title="学习进度"
+          >
+            <GraduationCap size={18} />
           </button>
           <div className="flex items-center gap-2">
             <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${mode === 'multi' ? 'bg-violet-600' : 'bg-indigo-500'}`}>
