@@ -1,6 +1,7 @@
 import { evaluate } from 'mathjs'
 import { getEmbedding } from './embeddings'
 import { semanticSearch } from './vector-store'
+import { Index } from '@upstash/vector'
 import type OpenAI from 'openai'
 
 export const TOOL_DEFINITIONS: OpenAI.ChatCompletionTool[] = [
@@ -106,7 +107,18 @@ export async function executeTool(
         const embedding = await getEmbedding(query)
         const results = await semanticSearch(embedding)
         if (results.length === 0) {
-          return '知识库中没有找到与此问题相关的内容（当前阈值0.2，请检查Vercel日志确认top scores）。'
+          // Debug: query with no threshold to see actual top scores
+          try {
+            const idx = new Index({
+              url: process.env.UPSTASH_VECTOR_REST_URL!,
+              token: process.env.UPSTASH_VECTOR_REST_TOKEN!,
+            })
+            const raw = await idx.query({ vector: embedding, topK: 3, includeMetadata: false })
+            const scores = raw.map(r => r.score.toFixed(3)).join(', ')
+            return `知识库中没有找到相关内容。【调试】Upstash原始top-3分数: ${scores}（阈值0.2）`
+          } catch {
+            return '知识库中没有找到与此问题相关的内容。'
+          }
         }
         return results
           .map((r, i) => {

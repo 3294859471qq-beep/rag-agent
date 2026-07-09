@@ -116,10 +116,7 @@ export async function semanticSearch(
     includeMetadata: true,
   })
 
-  // Debug: log top scores to see what we're actually getting
-  if (results.length > 0) {
-    console.log('[VectorSearch] top scores:', results.slice(0, 3).map(r => r.score.toFixed(3)))
-  }
+  console.log('[VectorSearch] top raw scores:', results.slice(0, 3).map(r => r.score.toFixed(3)))
 
   return results
     .filter(r => r.score >= minScore && r.metadata)
