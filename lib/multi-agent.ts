@@ -105,11 +105,13 @@ export function runMultiAgent(
 
           // Force first search with user's original question to maximize KB hit rate
           {
+            send({ type: 'tool_start', tool: 'search_knowledge', input: { query: `[预搜索] ${userQuestion}` } })
             const firstResult = await executeTool('search_knowledge', { query: userQuestion })
+            send({ type: 'tool_end', tool: 'search_knowledge', output: firstResult })
             if (!firstResult.startsWith('知识库中没有找到')) {
               researchMsgs.push({
                 role: 'user',
-                content: `[预搜索结果 - 使用用户原始问题搜索到的内容]\n${firstResult}\n\n请结合以上内容，针对研究目标"${goal.description}"进一步搜索补充。`,
+                content: `[预搜索结果]\n${firstResult}\n\n请结合以上内容，针对研究目标"${goal.description}"进一步搜索补充。`,
               })
             }
           }
