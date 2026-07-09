@@ -110,7 +110,7 @@ export async function executeTool(
         }
         return results
           .map((r, i) => {
-            const reliability = r.score >= 0.75 ? '★高' : r.score >= 0.6 ? '☆中' : '△低'
+            const reliability = r.score >= 0.7 ? '★高' : r.score >= 0.55 ? '☆中' : '△低'
             return `[片段 ${i + 1}] 来源:《${r.docTitle}》| 相关度: ${(r.score * 100).toFixed(1)}% (${reliability})\n${r.content}`
           })
           .join('\n\n---\n\n')
