@@ -104,75 +104,78 @@ function renderKatex(math: string, display: boolean): string {
   }
 }
 
-// Render a plain-text segment with inline markdown (bold, inline code)
-function renderInlineMarkdown(text: string): React.ReactNode[] {
+// Render inline markdown within a plain text string (bold, code)
+function InlineMd({ text }: { text: string }) {
+  const re = /(\*\*[^*\n]+\*\*|`[^`\n]+`)/g
   const nodes: React.ReactNode[] = []
-  // Split on **bold** and `code`
-  const re = /(\*\*[^*]+\*\*|`[^`]+`)/g
   let last = 0, m: RegExpExecArray | null, idx = 0
   while ((m = re.exec(text)) !== null) {
-    if (m.index > last) nodes.push(<span key={idx++}>{text.slice(last, m.index)}</span>)
+    if (m.index > last) nodes.push(text.slice(last, m.index))
     const tok = m[0]
-    if (tok.startsWith('**')) {
-      nodes.push(<strong key={idx++}>{tok.slice(2, -2)}</strong>)
-    } else {
-      nodes.push(<code key={idx++} className="bg-gray-100 rounded px-1 text-xs font-mono">{tok.slice(1, -1)}</code>)
-    }
+    if (tok.startsWith('**')) nodes.push(<strong key={idx++}>{tok.slice(2, -2)}</strong>)
+    else nodes.push(<code key={idx++} className="bg-gray-100 dark:bg-gray-700 rounded px-1 text-xs font-mono">{tok.slice(1, -1)}</code>)
     last = m.index + tok.length
   }
-  if (last < text.length) nodes.push(<span key={idx++}>{text.slice(last)}</span>)
-  return nodes
+  if (last < text.length) nodes.push(text.slice(last))
+  return <>{nodes}</>
+}
+
+// Render a text segment (no math) with block-level markdown
+function TextBlock({ text }: { text: string }) {
+  return (
+    <>
+      {text.split('\n').map((line, i) => {
+        const h2 = line.match(/^## (.+)/)
+        if (h2) return <h2 key={i} className="font-bold text-base mt-4 mb-1 text-gray-900">{h2[1]}</h2>
+        const h3 = line.match(/^### (.+)/)
+        if (h3) return <h3 key={i} className="font-semibold text-sm mt-3 mb-0.5 text-gray-800">{h3[1]}</h3>
+        const h4 = line.match(/^#### (.+)/)
+        if (h4) return <h4 key={i} className="font-semibold text-sm mt-2 text-gray-700">{h4[1]}</h4>
+        const num = line.match(/^(\d+)[.、]\s+(.*)/)
+        if (num) return (
+          <div key={i} className="flex gap-2 mt-1.5">
+            <span className="flex-shrink-0 font-semibold text-indigo-500 w-5 text-right">{num[1]}.</span>
+            <span><InlineMd text={num[2]} /></span>
+          </div>
+        )
+        const bul = line.match(/^[-*]\s+(.*)/)
+        if (bul) return (
+          <div key={i} className="flex gap-2 mt-1">
+            <span className="flex-shrink-0 text-indigo-400 w-3 text-center">•</span>
+            <span><InlineMd text={bul[1]} /></span>
+          </div>
+        )
+        if (line.trim() === '') return <div key={i} className="h-2" />
+        return <div key={i}><InlineMd text={line} /></div>
+      })}
+    </>
+  )
 }
 
 function MathContent({ content }: { content: string }) {
-  // Split into lines first to handle block-level structure
-  const lines = content.split('\n')
-  const elements: React.ReactNode[] = []
-
-  let i = 0
-  while (i < lines.length) {
-    const line = lines[i]
-
-    // Numbered list item: "1. " or "1、"
-    const listMatch = line.match(/^(\d+)[.、]\s+(.*)$/)
-    if (listMatch) {
-      const segs = parseMath(listMatch[2])
-      elements.push(
-        <div key={i} className="flex gap-2 mt-2">
-          <span className="flex-shrink-0 font-semibold text-indigo-600">{listMatch[1]}.</span>
-          <span>{segs.map((s, j) =>
-            s.type === 'text'
-              ? <span key={j}>{renderInlineMarkdown(s.content)}</span>
-              : <span key={j} className={s.type === 'block' ? 'block my-1 overflow-x-auto' : 'inline'}
-                  dangerouslySetInnerHTML={{ __html: renderKatex(s.content, s.type === 'block') }} />
-          )}</span>
-        </div>
-      )
-      i++; continue
-    }
-
-    // Empty line → spacer
-    if (line.trim() === '') {
-      elements.push(<div key={i} className="h-2" />)
-      i++; continue
-    }
-
-    // Normal line with mixed math + markdown
-    const segs = parseMath(line)
-    elements.push(
-      <div key={i} className={i > 0 && lines[i-1].trim() !== '' ? 'mt-1' : ''}>
-        {segs.map((s, j) =>
-          s.type === 'text'
-            ? <span key={j}>{renderInlineMarkdown(s.content)}</span>
-            : <span key={j} className={s.type === 'block' ? 'block my-2 overflow-x-auto text-center' : 'inline'}
-                dangerouslySetInnerHTML={{ __html: renderKatex(s.content, s.type === 'block') }} />
-        )}
-      </div>
-    )
-    i++
-  }
-
-  return <div className="leading-relaxed">{elements}</div>
+  // Parse math FIRST on the full string so multi-line \[...\] blocks are captured intact
+  const segs = parseMath(content)
+  return (
+    <div className="leading-relaxed">
+      {segs.map((seg, i) => {
+        if (seg.type === 'block') {
+          return (
+            <div key={i} className="my-3 py-1 overflow-x-auto text-center"
+              dangerouslySetInnerHTML={{ __html: renderKatex(seg.content.trim(), true) }}
+            />
+          )
+        }
+        if (seg.type === 'inline') {
+          return (
+            <span key={i}
+              dangerouslySetInnerHTML={{ __html: renderKatex(seg.content, false) }}
+            />
+          )
+        }
+        return <TextBlock key={i} text={seg.content} />
+      })}
+    </div>
+  )
 }
 
 // ─── Tool call step display ───────────────────────────────────────────────────
