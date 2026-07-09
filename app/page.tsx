@@ -104,22 +104,75 @@ function renderKatex(math: string, display: boolean): string {
   }
 }
 
+// Render a plain-text segment with inline markdown (bold, inline code)
+function renderInlineMarkdown(text: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = []
+  // Split on **bold** and `code`
+  const re = /(\*\*[^*]+\*\*|`[^`]+`)/g
+  let last = 0, m: RegExpExecArray | null, idx = 0
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) nodes.push(<span key={idx++}>{text.slice(last, m.index)}</span>)
+    const tok = m[0]
+    if (tok.startsWith('**')) {
+      nodes.push(<strong key={idx++}>{tok.slice(2, -2)}</strong>)
+    } else {
+      nodes.push(<code key={idx++} className="bg-gray-100 rounded px-1 text-xs font-mono">{tok.slice(1, -1)}</code>)
+    }
+    last = m.index + tok.length
+  }
+  if (last < text.length) nodes.push(<span key={idx++}>{text.slice(last)}</span>)
+  return nodes
+}
+
 function MathContent({ content }: { content: string }) {
-  const segs = parseMath(content)
-  return (
-    <>
-      {segs.map((seg, i) => {
-        if (seg.type === 'text') return <span key={i} className="whitespace-pre-wrap">{seg.content}</span>
-        return (
-          <span
-            key={i}
-            className={seg.type === 'block' ? 'block my-2 overflow-x-auto' : 'inline'}
-            dangerouslySetInnerHTML={{ __html: renderKatex(seg.content, seg.type === 'block') }}
-          />
-        )
-      })}
-    </>
-  )
+  // Split into lines first to handle block-level structure
+  const lines = content.split('\n')
+  const elements: React.ReactNode[] = []
+
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]
+
+    // Numbered list item: "1. " or "1、"
+    const listMatch = line.match(/^(\d+)[.、]\s+(.*)$/)
+    if (listMatch) {
+      const segs = parseMath(listMatch[2])
+      elements.push(
+        <div key={i} className="flex gap-2 mt-2">
+          <span className="flex-shrink-0 font-semibold text-indigo-600">{listMatch[1]}.</span>
+          <span>{segs.map((s, j) =>
+            s.type === 'text'
+              ? <span key={j}>{renderInlineMarkdown(s.content)}</span>
+              : <span key={j} className={s.type === 'block' ? 'block my-1 overflow-x-auto' : 'inline'}
+                  dangerouslySetInnerHTML={{ __html: renderKatex(s.content, s.type === 'block') }} />
+          )}</span>
+        </div>
+      )
+      i++; continue
+    }
+
+    // Empty line → spacer
+    if (line.trim() === '') {
+      elements.push(<div key={i} className="h-2" />)
+      i++; continue
+    }
+
+    // Normal line with mixed math + markdown
+    const segs = parseMath(line)
+    elements.push(
+      <div key={i} className={i > 0 && lines[i-1].trim() !== '' ? 'mt-1' : ''}>
+        {segs.map((s, j) =>
+          s.type === 'text'
+            ? <span key={j}>{renderInlineMarkdown(s.content)}</span>
+            : <span key={j} className={s.type === 'block' ? 'block my-2 overflow-x-auto text-center' : 'inline'}
+                dangerouslySetInnerHTML={{ __html: renderKatex(s.content, s.type === 'block') }} />
+        )}
+      </div>
+    )
+    i++
+  }
+
+  return <div className="leading-relaxed">{elements}</div>
 }
 
 // ─── Tool call step display ───────────────────────────────────────────────────
