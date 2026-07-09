@@ -106,7 +106,7 @@ export async function deleteDocument(id: string): Promise<void> {
 export async function semanticSearch(
   queryEmbedding: number[],
   topK = 6,
-  minScore = 0.35
+  minScore = 0.2
 ): Promise<Array<Chunk & { score: number }>> {
   const index = getIndex()
 
@@ -115,6 +115,11 @@ export async function semanticSearch(
     topK,
     includeMetadata: true,
   })
+
+  // Debug: log top scores to see what we're actually getting
+  if (results.length > 0) {
+    console.log('[VectorSearch] top scores:', results.slice(0, 3).map(r => r.score.toFixed(3)))
+  }
 
   return results
     .filter(r => r.score >= minScore && r.metadata)

@@ -106,7 +106,7 @@ export async function executeTool(
         const embedding = await getEmbedding(query)
         const results = await semanticSearch(embedding)
         if (results.length === 0) {
-          return '知识库中没有找到与此问题相关的内容。'
+          return '知识库中没有找到与此问题相关的内容（当前阈值0.2，请检查Vercel日志确认top scores）。'
         }
         return results
           .map((r, i) => {
