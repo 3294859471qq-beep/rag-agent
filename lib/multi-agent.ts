@@ -103,6 +103,17 @@ export function runMultiAgent(
 
           let rawData = '（未收集到数据）'
 
+          // Force first search with user's original question to maximize KB hit rate
+          {
+            const firstResult = await executeTool('search_knowledge', { query: userQuestion })
+            if (!firstResult.startsWith('知识库中没有找到')) {
+              researchMsgs.push({
+                role: 'user',
+                content: `[预搜索结果 - 使用用户原始问题搜索到的内容]\n${firstResult}\n\n请结合以上内容，针对研究目标"${goal.description}"进一步搜索补充。`,
+              })
+            }
+          }
+
           for (let round = 0; round < MAX_RESEARCH_ROUNDS; round++) {
             const resp = await client.chat.completions.create({
               model: MODEL,
