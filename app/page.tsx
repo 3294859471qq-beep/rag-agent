@@ -76,23 +76,23 @@ type Segment = { type: 'text' | 'block' | 'inline'; content: string }
 
 function parseMath(text: string): Segment[] {
   const segs: Segment[] = []
-  // Split on $$...$$ first (block math)
-  const blockParts = text.split(/(\$\$[\s\S]+?\$\$)/g)
-  for (const part of blockParts) {
-    if (part.startsWith('$$') && part.endsWith('$$')) {
-      segs.push({ type: 'block', content: part.slice(2, -2) })
+  // Match \[...\] | $$...$$ (block) or \(...\) | $...$ (inline), in that priority order
+  const re = /(\\\[[\s\S]+?\\\]|\$\$[\s\S]+?\$\$|\\\([\s\S]+?\\\)|\$[^$\n]{1,300}?\$)/g
+  let last = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) segs.push({ type: 'text', content: text.slice(last, m.index) })
+    const tok = m[0]
+    if (tok.startsWith('\\[') || tok.startsWith('$$')) {
+      segs.push({ type: 'block', content: tok.slice(2, -2) })
+    } else if (tok.startsWith('\\(')) {
+      segs.push({ type: 'inline', content: tok.slice(2, -2) })
     } else {
-      // Split on $...$ (inline math), avoid currency like $5
-      const inlineParts = part.split(/(\$[^$\n]{1,200}?\$)/g)
-      for (const p of inlineParts) {
-        if (p.startsWith('$') && p.endsWith('$') && p.length > 2) {
-          segs.push({ type: 'inline', content: p.slice(1, -1) })
-        } else {
-          if (p) segs.push({ type: 'text', content: p })
-        }
-      }
+      segs.push({ type: 'inline', content: tok.slice(1, -1) })
     }
+    last = m.index + tok.length
   }
+  if (last < text.length) segs.push({ type: 'text', content: text.slice(last) })
   return segs
 }
 
